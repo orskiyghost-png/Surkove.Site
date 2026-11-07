@@ -1,80 +1,57 @@
-name: Deploy SURKOVE
+name: Diagnose SURKOVE hosting
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - main
-  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  deploy:
-    name: Diagnose and deploy to Majordomo
+  diagnose:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-
     steps:
-      - name: Get repository files
-        uses: actions/checkout@v6
-
-      - name: Check FTP and SSH ports
-        id: ports
-        env:
-          FTP_HOST: 185.84.108.232
+      - name: Test Majordomo FTP and website HTTPS
         run: |
           python3 - <<'PY'
-          import os
           import socket
+          import sys
 
-          host = os.environ["FTP_HOST"]
+          checks = [
+              ("Majordomo FTP control", "185.84.108.232", 21),
+              ("SURKOVE HTTPS", "surkove.ru", 443),
+              ("SURKOVE HTTP", "surkove.ru", 80),
+          ]
+
           results = {}
-
-          for name, port in (("ftp", 21), ("ssh", 22)):
+          for label, host, port in checks:
+              print(f"\n--- {label}: {host}:{port} ---", flush=True)
               try:
-                  with socket.create_connection((host, port), timeout=12):
-                      print(f"{name.upper()} port {port}: OPEN — TCP connection successful")
-                      results[name] = "true"
-              except OSError as error:
-                  print(f"{name.upper()} port {port}: UNREACHABLE — {type(error).__name__}: {error}")
-                  results[name] = "false"
+                  addresses = sorted({item[4][0] for item in socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)})
+                  print("DNS:", ", ".join(addresses), flush=True)
+                  with socket.create_connection((host, port), timeout=15):
+                      print("TCP: CONNECTED", flush=True)
+                      results[label] = True
+              except Exception as exc:
+                  print(f"TCP: FAILED ({type(exc).__name__}: {exc})", flush=True)
+                  results[label] = False
 
-          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
-              for name, value in results.items():
-                  output.write(f"{name}={value}\n")
+          print("\n--- RESULT ---")
+          for label, ok in results.items():
+              print(f"{label}: {'OPEN' if ok else 'UNREACHABLE'}")
+
+          if not results.get("SURKOVE HTTPS", False):
+              print("\nHTTPS is not reachable from this GitHub runner. HTTPS-based deployment cannot be used until this is resolved.")
+          elif not results.get("Majordomo FTP control", False):
+              print("\nHTTPS works but FTP does not. We can switch to a protected HTTPS deployment endpoint and avoid inbound FTP/SSH.")
+          else:
+              print("\nFTP control port is reachable. The next test should inspect FTP login/passive data connection.")
           PY
 
-      - name: Explain SSH fallback
-        if: steps.ports.outputs.ftp != 'true' && steps.ports.outputs.ssh == 'true'
+      - name: Check HTTPS response (HTTP status is diagnostic only)
         run: |
-          echo "FTP port 21 is unreachable from GitHub Actions, but SSH port 22 is reachable."
-          echo "Deployment should be switched to SSH/SFTP after configuring an SSH key in Majordomo."
-
-      - name: Stop if neither FTP nor SSH is reachable
-        if: steps.ports.outputs.ftp != 'true' && steps.ports.outputs.ssh != 'true'
-        run: |
-          echo "::error::Both FTP (21) and SSH (22) are unreachable from GitHub Actions. This is a network/server access issue, not an FTP password or folder-path issue."
-          exit 1
-
-      - name: Upload website via FTP (connection test)
-        if: steps.ports.outputs.ftp == 'true'
-        uses: SamKirkland/FTP-Deploy-Action@v4.4.0
-        with:
-          server: ${{ secrets.FTP_SERVER }}
-          username: ${{ secrets.FTP_USERNAME }}
-          password: ${{ secrets.FTP_PASSWORD }}
-          port: 21
-          protocol: ftp
-          security: loose
-          timeout: 180000
-          log-level: verbose
-          server-dir: ${{ secrets.FTP_TARGET_DIR }}
-          local-dir: ./
-          dry-run: true
-          exclude: |
-            **/.git*
-            **/.git*/**
-            **/node_modules/**
-            **/.github/**
-            README.md
+          curl --verbose --location --max-time 25 --output /dev/null \
+            --write-out '\nHTTP_STATUS=%{http_code}\nREMOTE_IP=%{remote_ip}\n' \
+            https://surkove.ru/ || true
