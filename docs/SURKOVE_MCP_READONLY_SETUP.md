@@ -2,25 +2,24 @@
 
 ## Status and Scope
 
-This connector is a PHP endpoint intended to be deployed as `https://surkove.ru/mcp.php`. It provides authenticated, read-only diagnostics only. It does not connect to a live Majordomo installation in this repository: `origin/main` contains no PHP API, `update.php`, `.deploy`, or server configuration. No server deployment or production access was performed.
+This PHP endpoint is intended for `https://surkove.ru/mcp.php`. It exposes exactly three read-only diagnostics: `server_health`, `database_health`, and `mail_config_status`. There is no live Majordomo API or server configuration in this repository. No production deployment or database access was performed.
 
-The endpoint exposes exactly three tools: `server_health`, `database_health`, and `mail_config_status`. All advertise `readOnlyHint: true` and `destructiveHint: false`. Tool arguments are empty objects; callers cannot supply SQL, file paths, shell commands, mail content, or other operations.
+The endpoint accepts only fixed, empty tool arguments. It provides no arbitrary SQL, file, shell, write, user-registration, or email-sending operations.
 
-## Request Flow
+## Request and Protocol
 
-1. The endpoint loads the private PHP configuration from `dirname(__DIR__) . '/private/surkove-mcp.php'`. If the file is absent, unreadable, invalid, or lacks a valid SHA-256 token digest, it returns HTTP 503 without disclosing the path.
-2. It requires direct HTTPS as reported by the web server (`HTTPS` equal to `on` or `1`, or server port `443`), before checking the Bearer token. It does not trust `X-Forwarded-Proto`. It then accepts POST only, limits the body to 16 KiB, requires `Content-Type: application/json`, and disables response caching.
-3. If an `Origin` header is present, only `https://surkove.ru` and `https://www.surkove.ru` are accepted. CLI requests without `Origin` are permitted.
-4. It accepts a 64-hex-character Bearer token and compares its SHA-256 digest with the configured digest using `hash_equals`. Tokens in URL parameters are not read.
-5. Stateless discovery advertises only the modern Streamable HTTP version (`2026-07-28`). Legacy initialize handshakes remain available for `2025-11-25`, `2025-06-18`, and `2025-03-26`; those versions are not advertised by modern discovery. Modern requests must provide matching `MCP-Protocol-Version`, `Mcp-Method`, and, for `tools/call`, `Mcp-Name` headers and the required protocol-version and client-capabilities `_meta` fields.
+- Direct HTTPS is required based only on the server's `HTTPS=on`/`1` or `SERVER_PORT=443` values. `X-Forwarded-Proto` is not trusted. HTTPS is checked before configuration loading and bearer-token authorization.
+- Only POST is accepted. A present `Origin` must be `https://surkove.ru` or `https://www.surkove.ru`. The body is limited to 16 KiB, and `Content-Type` must be `application/json`.
+- MCP Streamable HTTP clients must send `Accept: application/json, text/event-stream`. The endpoint returns one JSON response; it does not implement SSE response streams.
+- Modern requests use `2026-07-28`. Discovery advertises only that version. Legacy initialize handshakes remain available for `2025-11-25`, `2025-06-18`, and `2025-03-26`.
+- Modern requests must provide matching `MCP-Protocol-Version` and `_meta.io.modelcontextprotocol/protocolVersion`, `Mcp-Method` and JSON-RPC `method`, plus `Mcp-Name` and `params.name` for `tools/call`. Client capabilities are required in `_meta.io.modelcontextprotocol/clientCapabilities`.
+- Responses disable HTTP caching. Modern `server/discover` and `tools/list` use `ttlMs: 0` and `cacheScope: private`.
 
-The database diagnostic creates a PDO connection from the private configuration and executes only the literal `SELECT 1`. It does not accept a query from the client or inspect application tables. The mail diagnostic checks configuration field presence only; it does not connect to SMTP, authenticate, or send messages.
+## Private Server Configuration
 
-## Private Configuration
+The private PHP configuration must be outside the web document root and contain only required data. If `mcp.php` is `/home/account/www/mcp.php`, the endpoint resolves the private file at `/home/account/private/surkove-mcp.php`. Create the parent directory with mode `700` and the file with mode `600`. Confirm the actual path and access restrictions with the hosting provider before generating any real token. Never put this file in `www`, the repository, or a deployment artifact.
 
-The private configuration must be outside the web document root. For example, if the public site directory is `/home/account/www`, place it at `/home/account/private/surkove-mcp.php`. This matches the endpoint's `dirname(__DIR__) . '/private/surkove-mcp.php'` lookup. The file is not part of this repository and must not be uploaded into `www` or committed.
-
-Example format with placeholders only:
+Example format (placeholders only):
 
 ```php
 <?php
@@ -28,64 +27,67 @@ return [
     'token_sha256' => 'REPLACE_WITH_64_LOWERCASE_HEX_CHARACTERS',
     'database' => [
         'dsn' => 'mysql:host=127.0.0.1;charset=utf8mb4',
-        'username' => 'REPLACE_READONLY_USER',
-        'password' => 'REPLACE_DATABASE_PASSWORD',
+        'username' => 'REPLACE_MCP_DATABASE_USER',
+        'password' => 'REPLACE_MCP_DATABASE_PASSWORD',
     ],
     'mail' => [
-        'host' => 'REPLACE_SMTP_HOST',
-        'port' => 587,
-        'username' => 'REPLACE_SMTP_USERNAME',
-        'password' => 'REPLACE_SMTP_PASSWORD',
-        'encryption' => 'tls',
-        'from_address' => 'REPLACE_SENDER_ADDRESS',
+        'status' => 'not_configured',
     ],
 ];
 ```
 
-The placeholder digest is not a usable token digest. Replace every placeholder only in the private server-side file. The endpoint needs PHP 8.3 or later with PDO, `pdo_mysql`, OpenSSL, JSON, and cURL extensions available for a fully healthy runtime. Do not put real passwords, token values, database hosts, or SMTP values in Git.
+The token placeholder is not usable. The server stores only the SHA-256 digest of the 32-byte bearer token. Do not put an SMTP password or SMTP credentials in this configuration. `mail.status` is an explicit value (`configured`, `incomplete`, or `not_configured`); if absent or invalid, MCP reports `not_specified`. Mail status responses say that SMTP connectivity and email sending have not been checked.
 
-## Token and Database Account
+The endpoint requires PHP 8.3+ and PDO, `pdo_mysql`, OpenSSL, JSON, and cURL extensions for a healthy runtime. Do not commit any real password, token, or private host value.
 
-Generate a 32-byte token locally; keep it in a secret manager or protected client environment and do not print it or commit it:
+## Token and Least-Privilege Database Account
+
+Only after the private config path and its owner/permissions are confirmed, generate a 32-byte token on the trusted client machine. This writes directly to a protected file, does not print the token, and does not put its value in shell history:
 
 ```sh
-export SURKOVE_MCP_TOKEN="$(openssl rand -hex 32)"
-printf '%s' "$SURKOVE_MCP_TOKEN" | sha256sum
+umask 077
+install -d -m 700 "$HOME/.config/surkove-mcp"
+token_file="$HOME/.config/surkove-mcp/token"
+openssl rand -hex 32 > "$token_file"
+chmod 600 "$token_file"
+sha256sum "$token_file" | cut -d ' ' -f 1
 ```
 
-Copy only the 64-character SHA-256 digest into `token_sha256` in the private PHP configuration. Give the token itself to the Copilot CLI through its authenticated HTTP header. The server stores only the digest.
+Copy only the 64-character digest into `token_sha256` in the server's private configuration. Keep the token file client-side, mode `600`, and outside the repository. Do not print or paste the token into chat or a terminal command.
 
-Create a dedicated database account through the hosting provider's approved administrative process, using a unique strong password. Because the connector only executes the literal `SELECT 1` without selecting or reading any tables, the account needs no table privileges and no database-level grants. Example SQL (replace identifiers and password yourself; do not run it from MCP):
+The connector opens MySQL without selecting a schema and executes only the literal `SELECT 1`; it does not read tables. Create a dedicated account through the hosting provider's approved administrative process, with no table privileges or database grants. The following is example SQL only; do not run it from MCP or against production as part of this repository task:
 
 ```sql
 CREATE USER 'surkove_mcp_ro'@'localhost' IDENTIFIED BY 'REPLACE_WITH_UNIQUE_PASSWORD';
 SHOW GRANTS FOR 'surkove_mcp_ro'@'localhost';
 ```
 
-Keep the DSN free of `dbname` so MySQL does not need to select an application schema for `SELECT 1`. If a hosting provider requires a schema-qualified DSN, ask the provider whether a database-scope `USAGE`-only grant is supported for that account; `USAGE` must not be replaced with `SELECT`, and it grants no table-reading permission. Do not apply a grant unless the provider confirms it is required. Never grant `INSERT`, `UPDATE`, `DELETE`, DDL, `FILE`, or administrative privileges. The connector itself still runs only `SELECT 1`.
+If a hosting provider requires a schema-qualified DSN, ask whether a database-scope `USAGE`-only grant is required and supported. `USAGE` grants no table-reading permission; do not substitute `SELECT`. Never grant `INSERT`, `UPDATE`, `DELETE`, DDL, `FILE`, or administrative privileges. No real account has been created and no SQL was run.
 
 ## Copilot CLI
 
-With `SURKOVE_MCP_TOKEN` set in the local shell, add the remote HTTP server:
+After confirming secure server-side configuration placement, load the token silently from its protected local file and add the endpoint over HTTPS:
 
 ```sh
+IFS= read -r -s SURKOVE_MCP_TOKEN < "$HOME/.config/surkove-mcp/token"
+umask 077
 copilot mcp add --transport http \
-  --header "Authorization: Bearer $SURKOVE_MCP_TOKEN" \
+  --header "Authorization: Bearer ${SURKOVE_MCP_TOKEN}" \
   surkove https://surkove.ru/mcp.php
+unset SURKOVE_MCP_TOKEN
+chmod 600 "$HOME/.copilot/mcp-config.json"
 ```
 
-The CLI stores the connection in user configuration, not this repository. Do not use `--show-secrets` when inspecting it. Remove the server from the CLI configuration and rotate the token if it is exposed.
+The command history contains the variable reference, not the token value. The CLI may persist the authorization header in its user configuration. Verify that `~/.copilot/mcp-config.json` is mode `600` without printing its contents or using `--show-secrets`. If credentials are exposed, remove the connection and rotate the token.
 
-The only allowed MCP tools are:
+The tools report:
 
-- `server_health`: PHP version, HTTPS request status, required extension availability, and database/mail configuration presence.
-- `database_health`: connection status and fixed `SELECT 1` result only.
-- `mail_config_status`: configured/incomplete status and missing SMTP field names only.
+- `server_health`: PHP version, HTTPS request status, required extension availability, database configuration presence, and explicit mail configuration status.
+- `database_health`: connection status and the fixed `SELECT 1` result only.
+- `mail_config_status`: explicit configuration status only, and explicit `false` values for SMTP-connection and email-sending checks.
 
-No file, SQL, shell, hosting, user-registration, password/OTP, or email-sending tools are implemented.
+## Manual Deployment
 
-## Future Manual Deployment
+This checkout's `origin/main` does not contain `update.php`; its behavior and manual update procedure cannot be verified from repository evidence. The public homepage, `update.php`, and `mcp.php` could not be reached during unauthenticated GET checks (network timeouts). It is therefore unknown whether `mcp.php` is already published or whether a secure private config path is available on the host.
 
-This checkout's `origin/main` does not contain `update.php`; therefore its interface, deployment behavior, and exact invocation cannot be verified or documented from repository evidence. No updater was created or changed. Before deployment, the operator must confirm the intended existing `update.php` in the actual hosting environment and follow its established manual procedure.
-
-When that procedure is confirmed, deploy only `mcp.php` to the public document root through the approved updater. Create `/private/surkove-mcp.php` separately outside the document root with restrictive filesystem permissions; never deploy that configuration from Git. Verify direct HTTPS and PHP 8.3+, install/enable `pdo_mysql` if needed, provision the dedicated no-table-privilege account outside MCP, and configure the client token whose digest is stored server-side. Then run authenticated read-only protocol checks. Do not enable the endpoint or connect real Majordomo credentials until a maintainer has reviewed and approved the configuration. This change does not perform deployment.
+Before any real connection, the operator must confirm the host's document root and private path, create the private config outside `www` with restrictive permissions, follow the approved manual deployment procedure for `mcp.php`, and verify HTTPS/PHP behavior on the real server. Only after the config location is confirmed safe should a client token be generated and its digest installed. Provision a separate no-table-privilege MySQL account through the host's approved process only if the database diagnostic is needed. No deployment, account creation, token generation, or production connection was performed for this change.

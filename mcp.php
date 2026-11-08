@@ -101,29 +101,6 @@ function surkoveMcpHasDatabaseConfig(mixed $database): bool
         && surkoveMcpIsNonEmptyString($database['password'] ?? null);
 }
 
-function surkoveMcpMissingMailFields(mixed $mail): array
-{
-    $requiredFields = ['host', 'port', 'username', 'password', 'encryption', 'from_address'];
-    $missing = [];
-
-    if (!is_array($mail)) {
-        return $requiredFields;
-    }
-
-    foreach ($requiredFields as $field) {
-        $value = $mail[$field] ?? null;
-        $present = $field === 'port'
-            ? (is_int($value) && $value > 0 && $value <= 65535)
-            : surkoveMcpIsNonEmptyString($value);
-
-        if (!$present) {
-            $missing[] = $field;
-        }
-    }
-
-    return $missing;
-}
-
 function surkoveMcpCompleteResult(string $protocolVersion, array|object $fields): array|object
 {
     if ($protocolVersion === SURKOVE_MCP_MODERN_VERSION) {
@@ -144,7 +121,7 @@ function surkoveMcpToolDefinitions(): array
     return [
         [
             'name' => 'server_health',
-            'description' => 'Reports PHP runtime, required extension availability, HTTPS request status, and whether database and mail configuration are present. Does not expose configuration values.',
+            'description' => 'Reports PHP runtime, required extension availability, HTTPS request status, database configuration presence, and explicit mail configuration status. Does not expose configuration values.',
             'inputSchema' => $emptyObjectSchema,
             'annotations' => ['readOnlyHint' => true, 'destructiveHint' => false],
         ],
@@ -156,7 +133,7 @@ function surkoveMcpToolDefinitions(): array
         ],
         [
             'name' => 'mail_config_status',
-            'description' => 'Reports whether required SMTP configuration fields are present and lists only missing field names. Does not connect to SMTP or send mail.',
+            'description' => 'Reports only the explicitly configured mail status. SMTP connectivity and email sending are not checked.',
             'inputSchema' => $emptyObjectSchema,
             'annotations' => ['readOnlyHint' => true, 'destructiveHint' => false],
         ],
@@ -167,7 +144,6 @@ function surkoveMcpToolPayload(string $name, array $config): array
 {
     if ($name === 'server_health') {
         $databaseConfigured = surkoveMcpHasDatabaseConfig($config['database'] ?? null);
-        $missingMailFields = surkoveMcpMissingMailFields($config['mail'] ?? null);
 
         return [
             'php_version' => PHP_VERSION,
@@ -180,7 +156,7 @@ function surkoveMcpToolPayload(string $name, array $config): array
                 'cURL' => extension_loaded('curl'),
             ],
             'database_configured' => $databaseConfigured,
-            'mail_configured' => $missingMailFields === [],
+            'mail_config_status' => surkoveMcpMailConfigStatus($config['mail'] ?? null),
         ];
     }
 
@@ -215,15 +191,23 @@ function surkoveMcpToolPayload(string $name, array $config): array
     }
 
     if ($name === 'mail_config_status') {
-        $missingFields = surkoveMcpMissingMailFields($config['mail'] ?? null);
-
         return [
-            'status' => $missingFields === [] ? 'configured' : 'incomplete',
-            'missing_fields' => $missingFields,
+            'status' => surkoveMcpMailConfigStatus($config['mail'] ?? null),
+            'smtp_connection_checked' => false,
+            'email_sending_checked' => false,
         ];
     }
 
     throw new InvalidArgumentException('Unknown tool');
+}
+
+function surkoveMcpMailConfigStatus(mixed $mail): string
+{
+    $status = is_array($mail) ? ($mail['status'] ?? null) : null;
+
+    return is_string($status) && in_array($status, ['configured', 'incomplete', 'not_configured'], true)
+        ? $status
+        : 'not_specified';
 }
 
 function surkoveMcpSendToolResult(string $protocolVersion, mixed $requestId, array $payload): void
@@ -250,6 +234,16 @@ if (!surkoveMcpIsHttpsRequest()) {
     surkoveMcpSendHttpError(403, 'HTTPS is required');
 }
 
+if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
+    header('Allow: POST');
+    surkoveMcpSendHttpError(405, 'Method Not Allowed');
+}
+
+if (array_key_exists('HTTP_ORIGIN', $_SERVER)
+    && !in_array($_SERVER['HTTP_ORIGIN'], ['https://surkove.ru', 'https://www.surkove.ru'], true)) {
+    surkoveMcpSendHttpError(403, 'Origin Forbidden');
+}
+
 $privateConfigPath = dirname(__DIR__) . '/private/surkove-mcp.php';
 if (!is_file($privateConfigPath) || !is_readable($privateConfigPath)) {
     surkoveMcpSendHttpError(503, 'MCP server configuration is unavailable');
@@ -264,16 +258,6 @@ try {
 if (!is_array($config) || !is_string($config['token_sha256'] ?? null)
     || !preg_match('/\A[a-f0-9]{64}\z/', $config['token_sha256'])) {
     surkoveMcpSendHttpError(503, 'MCP server configuration is unavailable');
-}
-
-if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
-    header('Allow: POST');
-    surkoveMcpSendHttpError(405, 'Method Not Allowed');
-}
-
-if (array_key_exists('HTTP_ORIGIN', $_SERVER)
-    && !in_array($_SERVER['HTTP_ORIGIN'], ['https://surkove.ru', 'https://www.surkove.ru'], true)) {
-    surkoveMcpSendHttpError(403, 'Origin Forbidden');
 }
 
 $contentType = $_SERVER['CONTENT_TYPE'] ?? '';

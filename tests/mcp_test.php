@@ -1,6 +1,11 @@
 <?php
 declare(strict_types=1);
 
+if (PHP_SAPI !== 'cli') {
+    http_response_code(404);
+    exit;
+}
+
 function assertSameValue(mixed $expected, mixed $actual, string $message): void
 {
     if ($expected !== $actual) {
@@ -73,23 +78,33 @@ function stopTestServer(mixed $process): void
     }
 }
 
-function sendRequest(string $url, array $payload, array $headers = [], bool $authorize = true): array
-{
-    $headers = array_merge(['Content-Type: application/json'], $headers);
+function sendRawRequest(
+    string $url,
+    string $method,
+    ?string $body,
+    array $headers = [],
+    bool $authorize = true,
+    ?string $token = null
+): array {
+    $requestHeaders = array_merge([
+        'Accept: application/json, text/event-stream',
+    ], $headers);
     if ($authorize) {
-        $headers[] = 'Authorization: Bearer ' . str_repeat('a', 64);
+        $requestHeaders[] = 'Authorization: Bearer ' . ($token ?? $GLOBALS['testToken']);
     }
-    $context = stream_context_create([
-        'http' => [
-            'method' => 'POST',
-            'header' => implode("\r\n", $headers),
-            'content' => json_encode($payload, JSON_THROW_ON_ERROR),
-            'ignore_errors' => true,
-            'timeout' => 3,
-        ],
-    ]);
-    $body = file_get_contents($url, false, $context);
-    if ($body === false) {
+
+    $options = [
+        'method' => $method,
+        'header' => implode("\r\n", $requestHeaders),
+        'ignore_errors' => true,
+        'timeout' => 3,
+    ];
+    if ($body !== null) {
+        $options['content'] = $body;
+    }
+    $context = stream_context_create(['http' => $options]);
+    $response = file_get_contents($url, false, $context);
+    if ($response === false) {
         throw new RuntimeException('Request to test server failed');
     }
     $status = 0;
@@ -98,6 +113,27 @@ function sendRequest(string $url, array $payload, array $headers = [], bool $aut
             $status = (int) $match[1];
         }
     }
+
+    return [$status, $response];
+}
+
+function sendRequest(
+    string $url,
+    array $payload,
+    array $headers = [],
+    bool $authorize = true,
+    ?string $token = null
+): array
+{
+    $headers = array_merge(['Content-Type: application/json'], $headers);
+    [$status, $body] = sendRawRequest(
+        $url,
+        'POST',
+        json_encode($payload, JSON_THROW_ON_ERROR),
+        $headers,
+        $authorize,
+        $token
+    );
 
     return [$status, json_decode($body, true, 32, JSON_THROW_ON_ERROR)];
 }
@@ -153,19 +189,27 @@ $root = sys_get_temp_dir() . '/surkove-mcp-test-' . bin2hex(random_bytes(8));
 $httpProcess = null;
 $httpsProcess = null;
 $passed = 0;
+$testToken = bin2hex(random_bytes(32));
 
 try {
     mkdir($root . '/public', 0700, true);
     mkdir($root . '/private', 0700);
+    mkdir($root . '/public/tests', 0700);
     copy(__DIR__ . '/../mcp.php', $root . '/public/mcp.php');
+    copy(__FILE__, $root . '/public/tests/mcp_test.php');
+    copy(__DIR__ . '/.htaccess', $root . '/public/tests/.htaccess');
     file_put_contents(
         $root . '/private/surkove-mcp.php',
-        "<?php return ['token_sha256' => '" . hash('sha256', str_repeat('a', 64)) . "'];\n"
+        "<?php return ['token_sha256' => '" . hash('sha256', $testToken)
+        . "', 'mail' => ['status' => 'configured'], 'database' => []];\n"
     );
     file_put_contents(
         $root . '/router.php',
         "<?php\nif (getenv('SURKOVE_TEST_HTTPS') === '1') { \$_SERVER['HTTPS'] = 'on'; }\n"
-        . "require __DIR__ . '/public/mcp.php';\n"
+        . "if (parse_url(\$_SERVER['REQUEST_URI'], PHP_URL_PATH) === '/tests/mcp_test.php') {\n"
+        . "    require __DIR__ . '/public/tests/mcp_test.php';\n"
+        . "    return;\n"
+        . "}\nrequire __DIR__ . '/public/mcp.php';\n"
     );
 
     [$httpProcess, $httpUrl] = startTestServer($root, false);
@@ -179,6 +223,59 @@ try {
     $httpProcess = null;
 
     [$httpsProcess, $httpsUrl] = startTestServer($root, true);
+    [$status, $response] = sendRequest(
+        $httpsUrl,
+        ['jsonrpc' => '2.0', 'id' => 1, 'method' => 'ping'],
+        [],
+        false
+    );
+    assertSameValue(401, $status, 'Missing Bearer token should be rejected');
+    $passed++;
+
+    [$status, $response] = sendRequest(
+        $httpsUrl,
+        ['jsonrpc' => '2.0', 'id' => 1, 'method' => 'ping'],
+        [],
+        true,
+        str_repeat('f', 64)
+    );
+    assertSameValue(401, $status, 'Invalid Bearer token should be rejected');
+    $passed++;
+
+    [$status, $response] = sendRequest(
+        $httpsUrl,
+        ['jsonrpc' => '2.0', 'id' => 1, 'method' => 'ping'],
+        ['Origin: https://attacker.example']
+    );
+    assertSameValue(403, $status, 'Disallowed Origin should be rejected');
+    $passed++;
+
+    [$status, $response] = sendRawRequest(
+        $httpsUrl,
+        'GET',
+        null
+    );
+    assertSameValue(405, $status, 'GET should be rejected');
+    $passed++;
+
+    [$status, $response] = sendRawRequest(
+        $httpsUrl,
+        'POST',
+        '{}',
+        ['Content-Type: text/plain']
+    );
+    assertSameValue(415, $status, 'Unsupported Content-Type should be rejected');
+    $passed++;
+
+    [$status, $response] = sendRawRequest(
+        $httpsUrl,
+        'POST',
+        str_repeat('x', 16385),
+        ['Content-Type: application/json']
+    );
+    assertSameValue(413, $status, 'Oversized request body should be rejected');
+    $passed++;
+
     [$status, $response] = sendRequest(
         $httpsUrl,
         modernRequest('server/discover'),
@@ -200,6 +297,42 @@ try {
     assertSameValue('private', $response['result']['cacheScope'] ?? null, 'tools/list cacheScope should be private');
     $toolNames = array_column($response['result']['tools'] ?? [], 'name');
     assertSameValue(['server_health', 'database_health', 'mail_config_status'], $toolNames, 'Only the three read-only tools should be available');
+    $passed++;
+
+    [$status, $response] = sendRequest(
+        $httpsUrl,
+        modernRequest('tools/call', ['name' => 'server_health', 'arguments' => (object) []]),
+        modernHeaders('tools/call', 'server_health')
+    );
+    assertSameValue(200, $status, 'server_health should be callable');
+    $serverHealth = json_decode($response['result']['content'][0]['text'] ?? '', true, 32, JSON_THROW_ON_ERROR);
+    assertSameValue(true, $serverHealth['https'] ?? null, 'server_health should report HTTPS');
+    assertSameValue(false, $serverHealth['database_configured'] ?? null, 'server_health should report unconfigured test database');
+    assertSameValue('configured', $serverHealth['mail_config_status'] ?? null, 'server_health should expose only explicit mail status');
+    $passed++;
+
+    [$status, $response] = sendRequest(
+        $httpsUrl,
+        modernRequest('tools/call', ['name' => 'database_health', 'arguments' => (object) []]),
+        modernHeaders('tools/call', 'database_health')
+    );
+    assertSameValue(200, $status, 'database_health should be callable without connecting to a database');
+    $databaseHealth = json_decode($response['result']['content'][0]['text'] ?? '', true, 32, JSON_THROW_ON_ERROR);
+    assertSameValue('not_configured', $databaseHealth['status'] ?? null, 'database_health should not connect without configuration');
+    $passed++;
+
+    [$status, $response] = sendRequest(
+        $httpsUrl,
+        modernRequest('tools/call', ['name' => 'mail_config_status', 'arguments' => (object) []]),
+        modernHeaders('tools/call', 'mail_config_status')
+    );
+    assertSameValue(200, $status, 'mail_config_status should be callable');
+    $mailStatus = json_decode($response['result']['content'][0]['text'] ?? '', true, 32, JSON_THROW_ON_ERROR);
+    assertSameValue([
+        'status' => 'configured',
+        'smtp_connection_checked' => false,
+        'email_sending_checked' => false,
+    ], $mailStatus, 'mail status should expose no credentials and make no SMTP verification claim');
     $passed++;
 
     [$status, $response] = sendRequest(
@@ -265,6 +398,27 @@ try {
         assertSameValue('Unknown read-only tool', $response['error']['message'] ?? null, "$unsupportedTool must be rejected");
         $passed++;
     }
+
+    [$status, $body] = sendRawRequest(
+        preg_replace('~/mcp\.php\z~', '', $httpsUrl) . '/tests/mcp_test.php',
+        'GET',
+        null
+    );
+    assertSameValue(404, $status, 'HTTP execution of the test script should be denied by the PHP SAPI guard');
+    assertSameValue('', $body, 'HTTP execution of the test script should return no content');
+    $passed++;
+
+    foreach (['tests', 'docs'] as $protectedDirectory) {
+        $rules = file_get_contents(__DIR__ . '/../' . $protectedDirectory . '/.htaccess');
+        assertTrue(is_string($rules) && str_contains($rules, 'Require all denied')
+            && str_contains($rules, 'Order allow,deny')
+            && str_contains($rules, 'Deny from all'), "$protectedDirectory must deny access on Apache 2.4 and 2.2");
+        $passed++;
+    }
+
+    $serverLog = file_get_contents($root . '/server-https.log') . file_get_contents($root . '/server-http.log');
+    assertTrue(!str_contains($serverLog, $testToken), 'Bearer token must not appear in local server logs');
+    $passed++;
 } finally {
     stopTestServer($httpProcess);
     stopTestServer($httpsProcess);
