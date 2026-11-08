@@ -2,7 +2,7 @@ import { lazy, Suspense, useEffect, useState } from 'react';
 import WarpText from './WarpText.jsx';
 
 const ColorBends = lazy(() => import('./ColorBends.jsx'));
-const BEND_COLORS = ['#674c92', '#4d3c63', '#8a6bb5', '#574273'];
+const BEND_COLORS = ['#5227FF', '#ff00f7', '#7cff67', '#ff0000'];
 
 const prefersReducedMotion = () => {
   if (typeof window === 'undefined' || !window.matchMedia) return false;
@@ -49,19 +49,19 @@ export default function App() {
             <ColorBends
               className="site-color-bends"
               colors={BEND_COLORS}
-              rotation={248}
-              speed={0.28}
-              scale={0.72}
+              rotation={255}
+              speed={0.75}
+              scale={0.5}
               frequency={1}
-              warpStrength={0.82}
-              mouseInfluence={0}
-              noise={0.045}
-              parallax={0}
+              warpStrength={1}
+              mouseInfluence={0.2}
+              noise={0.15}
+              parallax={1}
               iterations={1}
-              intensity={1.15}
-              bandWidth={2.3}
+              intensity={1.5}
+              bandWidth={6}
               transparent
-              autoRotate={0.045}
+              autoRotate={0.55}
               style={{ width: '100%', height: '100%' }}
             />
           </Suspense>
