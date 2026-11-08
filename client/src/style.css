@@ -4,6 +4,7 @@
   --text: #171717;
   --muted: #737373;
   --accent: #2563eb;
+  --silk-color: #e4e1e8;
   font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   background: var(--page-bg);
   color: var(--text);
@@ -17,14 +18,45 @@ body {
   min-height: 100vh;
   min-height: 100svh;
   margin: 0;
-  display: grid;
-  place-items: center;
-  padding: clamp(28px, 7vw, 64px) 22px;
   background: var(--page-bg);
 }
 
 #root {
   width: 100%;
+  min-height: 100vh;
+  min-height: 100svh;
+}
+
+.page-shell {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  min-height: 100vh;
+  min-height: 100svh;
+  padding: clamp(28px, 7vw, 64px) 22px;
+  overflow: hidden;
+  background: var(--page-bg);
+}
+
+.silk-background {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  overflow: hidden;
+  opacity: .62;
+  pointer-events: none;
+}
+
+.silk-background .silk-container {
+  width: 100%;
+  height: 100%;
+}
+
+.page-shell > main {
+  position: relative;
+  z-index: 1;
 }
 
 main {
@@ -49,10 +81,12 @@ main {
   padding: 7px 12px;
   border: 1px solid rgba(37, 99, 235, .18);
   border-radius: 999px;
-  background: rgba(37, 99, 235, .055);
+  background: rgba(247, 247, 245, .82);
   color: #1d4ed8;
   font-size: 13px;
   font-weight: 600;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
 }
 
 .dot {
@@ -112,10 +146,12 @@ main {
   .brand { margin-bottom: 26px; }
   .description { margin-top: 21px; }
   .details { margin-top: 30px; }
+  .silk-background { opacity: .52; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     scroll-behavior: auto !important;
   }
+  .silk-background { opacity: .4; }
 }
