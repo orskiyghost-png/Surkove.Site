@@ -72,10 +72,10 @@ export default function App() {
         <header className="site-header">
           <span className="wordmark" aria-hidden="true">
             <GradientText
-              colors={['#111114', '#77777F']}
+              colors={['#000000', '#ffffff']}
               animationSpeed={3}
               variant="flow"
-              glow={0.18}
+              glow={0.4}
             >
               Surkove
             </GradientText>
