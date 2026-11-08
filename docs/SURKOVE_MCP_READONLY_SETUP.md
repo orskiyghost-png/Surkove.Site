@@ -9,10 +9,10 @@ The endpoint exposes exactly three tools: `server_health`, `database_health`, an
 ## Request Flow
 
 1. The endpoint loads the private PHP configuration from `dirname(__DIR__) . '/private/surkove-mcp.php'`. If the file is absent, unreadable, invalid, or lacks a valid SHA-256 token digest, it returns HTTP 503 without disclosing the path.
-2. It accepts POST only, limits the body to 16 KiB, requires `Content-Type: application/json`, and disables response caching.
+2. It requires direct HTTPS as reported by the web server (`HTTPS` equal to `on` or `1`, or server port `443`), before checking the Bearer token. It does not trust `X-Forwarded-Proto`. It then accepts POST only, limits the body to 16 KiB, requires `Content-Type: application/json`, and disables response caching.
 3. If an `Origin` header is present, only `https://surkove.ru` and `https://www.surkove.ru` are accepted. CLI requests without `Origin` are permitted.
 4. It accepts a 64-hex-character Bearer token and compares its SHA-256 digest with the configured digest using `hash_equals`. Tokens in URL parameters are not read.
-5. It supports modern Streamable HTTP (`2026-07-28`) and legacy initialize-based versions (`2025-11-25`, `2025-06-18`, `2025-03-26`). Modern requests must provide matching `MCP-Protocol-Version`, `Mcp-Method`, and, for `tools/call`, `Mcp-Name` headers and the required protocol-version and client-capabilities `_meta` fields.
+5. Stateless discovery advertises only the modern Streamable HTTP version (`2026-07-28`). Legacy initialize handshakes remain available for `2025-11-25`, `2025-06-18`, and `2025-03-26`; those versions are not advertised by modern discovery. Modern requests must provide matching `MCP-Protocol-Version`, `Mcp-Method`, and, for `tools/call`, `Mcp-Name` headers and the required protocol-version and client-capabilities `_meta` fields.
 
 The database diagnostic creates a PDO connection from the private configuration and executes only the literal `SELECT 1`. It does not accept a query from the client or inspect application tables. The mail diagnostic checks configuration field presence only; it does not connect to SMTP, authenticate, or send messages.
 
@@ -27,8 +27,8 @@ Example format with placeholders only:
 return [
     'token_sha256' => 'REPLACE_WITH_64_LOWERCASE_HEX_CHARACTERS',
     'database' => [
-        'dsn' => 'mysql:host=127.0.0.1;dbname=REPLACE_DATABASE;charset=utf8mb4',
-        'username' => 'REPLACE_SELECT_ONLY_USER',
+        'dsn' => 'mysql:host=127.0.0.1;charset=utf8mb4',
+        'username' => 'REPLACE_READONLY_USER',
         'password' => 'REPLACE_DATABASE_PASSWORD',
     ],
     'mail' => [
@@ -55,15 +55,14 @@ printf '%s' "$SURKOVE_MCP_TOKEN" | sha256sum
 
 Copy only the 64-character SHA-256 digest into `token_sha256` in the private PHP configuration. Give the token itself to the Copilot CLI through its authenticated HTTP header. The server stores only the digest.
 
-Create a dedicated database account through the hosting provider's approved administrative process, using a unique strong password. Example SQL (replace identifiers and password yourself; do not run it from MCP):
+Create a dedicated database account through the hosting provider's approved administrative process, using a unique strong password. Because the connector only executes the literal `SELECT 1` without selecting or reading any tables, the account needs no table privileges and no database-level grants. Example SQL (replace identifiers and password yourself; do not run it from MCP):
 
 ```sql
 CREATE USER 'surkove_mcp_ro'@'localhost' IDENTIFIED BY 'REPLACE_WITH_UNIQUE_PASSWORD';
-GRANT SELECT ON `REPLACE_DATABASE`.* TO 'surkove_mcp_ro'@'localhost';
 SHOW GRANTS FOR 'surkove_mcp_ro'@'localhost';
 ```
 
-Grant no `INSERT`, `UPDATE`, `DELETE`, DDL, `FILE`, or administrative privileges. The connector itself still runs only `SELECT 1`.
+Keep the DSN free of `dbname` so MySQL does not need to select an application schema for `SELECT 1`. If a hosting provider requires a schema-qualified DSN, ask the provider whether a database-scope `USAGE`-only grant is supported for that account; `USAGE` must not be replaced with `SELECT`, and it grants no table-reading permission. Do not apply a grant unless the provider confirms it is required. Never grant `INSERT`, `UPDATE`, `DELETE`, DDL, `FILE`, or administrative privileges. The connector itself still runs only `SELECT 1`.
 
 ## Copilot CLI
 
@@ -89,4 +88,4 @@ No file, SQL, shell, hosting, user-registration, password/OTP, or email-sending 
 
 This checkout's `origin/main` does not contain `update.php`; therefore its interface, deployment behavior, and exact invocation cannot be verified or documented from repository evidence. No updater was created or changed. Before deployment, the operator must confirm the intended existing `update.php` in the actual hosting environment and follow its established manual procedure.
 
-When that procedure is confirmed, deploy only `mcp.php` to the public document root through the approved updater. Create `/private/surkove-mcp.php` separately outside the document root with restrictive filesystem permissions; never deploy that configuration from Git. Verify HTTPS and PHP 8.3+, install/enable `pdo_mysql` if needed, provision the dedicated SELECT-only account outside MCP, and configure the client token whose digest is stored server-side. Then run authenticated read-only protocol checks. Do not enable the endpoint or connect real Majordomo credentials until a maintainer has reviewed and approved the configuration. This change does not perform deployment.
+When that procedure is confirmed, deploy only `mcp.php` to the public document root through the approved updater. Create `/private/surkove-mcp.php` separately outside the document root with restrictive filesystem permissions; never deploy that configuration from Git. Verify direct HTTPS and PHP 8.3+, install/enable `pdo_mysql` if needed, provision the dedicated no-table-privilege account outside MCP, and configure the client token whose digest is stored server-side. Then run authenticated read-only protocol checks. Do not enable the endpoint or connect real Majordomo credentials until a maintainer has reviewed and approved the configuration. This change does not perform deployment.

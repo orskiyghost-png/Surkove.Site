@@ -5,9 +5,6 @@ const SURKOVE_MCP_MODERN_VERSION = '2026-07-28';
 const SURKOVE_MCP_LEGACY_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26'];
 const SURKOVE_MCP_SUPPORTED_VERSIONS = [
     SURKOVE_MCP_MODERN_VERSION,
-    '2025-11-25',
-    '2025-06-18',
-    '2025-03-26',
 ];
 const SURKOVE_MCP_MAX_BODY_BYTES = 16384;
 const SURKOVE_MCP_PROTOCOL_META = 'io.modelcontextprotocol/protocolVersion';
@@ -77,6 +74,14 @@ function surkoveMcpHeader(string $name): ?string
     $value = $_SERVER[$serverKey] ?? null;
 
     return is_string($value) ? $value : null;
+}
+
+function surkoveMcpIsHttpsRequest(): bool
+{
+    $https = $_SERVER['HTTPS'] ?? null;
+
+    return (is_string($https) && in_array(strtolower($https), ['on', '1'], true))
+        || (string) ($_SERVER['SERVER_PORT'] ?? '') === '443';
 }
 
 function surkoveMcpIsNonEmptyString(mixed $value): bool
@@ -163,12 +168,10 @@ function surkoveMcpToolPayload(string $name, array $config): array
     if ($name === 'server_health') {
         $databaseConfigured = surkoveMcpHasDatabaseConfig($config['database'] ?? null);
         $missingMailFields = surkoveMcpMissingMailFields($config['mail'] ?? null);
-        $https = (!empty($_SERVER['HTTPS']) && strtolower((string) $_SERVER['HTTPS']) !== 'off')
-            || (string) ($_SERVER['SERVER_PORT'] ?? '') === '443';
 
         return [
             'php_version' => PHP_VERSION,
-            'https' => $https,
+            'https' => surkoveMcpIsHttpsRequest(),
             'extensions' => [
                 'PDO' => extension_loaded('PDO'),
                 'pdo_mysql' => extension_loaded('pdo_mysql'),
@@ -241,6 +244,10 @@ function surkoveMcpSendToolResult(string $protocolVersion, mixed $requestId, arr
             'isError' => false,
         ]),
     ]);
+}
+
+if (!surkoveMcpIsHttpsRequest()) {
+    surkoveMcpSendHttpError(403, 'HTTPS is required');
 }
 
 $privateConfigPath = dirname(__DIR__) . '/private/surkove-mcp.php';
@@ -429,6 +436,8 @@ if ($method === 'server/discover' && $isModernRequest) {
         'id' => $requestId,
         'result' => [
             'resultType' => 'complete',
+            'ttlMs' => 0,
+            'cacheScope' => 'private',
             'supportedVersions' => SURKOVE_MCP_SUPPORTED_VERSIONS,
             'capabilities' => ['tools' => (object) []],
             '_meta' => [SURKOVE_MCP_SERVER_INFO_META => [
@@ -440,7 +449,7 @@ if ($method === 'server/discover' && $isModernRequest) {
     ]);
 }
 
-if ($method === 'ping') {
+if ($method === 'ping' && !$isModernRequest) {
     surkoveMcpSendJson(200, [
         'jsonrpc' => '2.0',
         'id' => $requestId,
@@ -449,12 +458,18 @@ if ($method === 'ping') {
 }
 
 if ($method === 'tools/list') {
+    $result = surkoveMcpCompleteResult($protocolVersion, [
+        'tools' => surkoveMcpToolDefinitions(),
+    ]);
+    if ($isModernRequest) {
+        $result['ttlMs'] = 0;
+        $result['cacheScope'] = 'private';
+    }
+
     surkoveMcpSendJson(200, [
         'jsonrpc' => '2.0',
         'id' => $requestId,
-        'result' => surkoveMcpCompleteResult($protocolVersion, [
-            'tools' => surkoveMcpToolDefinitions(),
-        ]),
+        'result' => $result,
     ]);
 }
 
