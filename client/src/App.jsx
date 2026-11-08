@@ -3,6 +3,7 @@ import { useReducedMotion } from 'motion/react';
 import RotatingText from './RotatingText.jsx';
 import SpecularButton from './SpecularButton.jsx';
 import RegistrationDialog from './RegistrationDialog.jsx';
+import GradientText from './GradientText.jsx';
 
 const Threads = lazy(() => import('./Threads.jsx'));
 const rotatingWords = ['цифровые товары', 'онлайн-услуги', 'новые решения'];
@@ -69,7 +70,16 @@ export default function App() {
 
       <div className="site-content" aria-hidden={registrationOpen} inert={registrationOpen}>
         <header className="site-header">
-          <span className="wordmark" aria-hidden="true">Surkove</span>
+          <span className="wordmark" aria-hidden="true">
+            <GradientText
+              colors={['#111114', '#77777F']}
+              animationSpeed={3}
+              variant="flow"
+              glow={0.18}
+            >
+              Surkove
+            </GradientText>
+          </span>
         </header>
 
         <main className="hero-content" aria-labelledby="hero-title">
