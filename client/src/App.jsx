@@ -84,7 +84,6 @@ export default function App() {
 
         <main className="hero-content" aria-labelledby="hero-title">
           <h1 className="hero-title" id="hero-title">
-            <span className="hero-title__brand">Surkove</span>
             <span className="hero-title__rotating">
               <RotatingText
                 texts={rotatingWords}
@@ -98,6 +97,7 @@ export default function App() {
                 loop={true}
                 auto={!prefersReducedMotion}
                 highlight={false}
+                animateLayout={false}
                 animatePresenceMode="wait"
                 animatePresenceInitial={false}
                 mainClassName="hero-rotating"

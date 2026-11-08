@@ -107,6 +107,7 @@ const RotatingText = forwardRef((props, ref) => {
     highlightColor = '#a855f7',
     animatePresenceMode = 'wait',
     animatePresenceInitial = false,
+    animateLayout = true,
     rotationInterval = 2000,
     staggerDuration = 0,
     staggerFrom = 'first',
@@ -279,7 +280,7 @@ const RotatingText = forwardRef((props, ref) => {
       <motion.span
         key={activeIndex}
         className={cn(splitBy === 'lines' ? 'text-rotate-lines' : 'text-rotate')}
-        layout={!highlight}
+        layout={animateLayout && !highlight}
         aria-hidden="true"
       >
         {elements.map((wordObj, wordIndex, array) => {
@@ -318,7 +319,7 @@ const RotatingText = forwardRef((props, ref) => {
         style={blockStyle}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
-        layout={!highlight}
+        layout={animateLayout && !highlight}
         transition={transition ?? LAYOUT_SPRING}
       >
         <span className="text-rotate-sr-only">{texts[activeIndex]}</span>
