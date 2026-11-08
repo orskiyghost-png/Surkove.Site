@@ -55,10 +55,10 @@ const EFFECTS = {
     exitTransition: { type: 'tween', duration: 0.32, ease: [0.5, 0, 0.75, 0] }
   }),
   blur: up => ({
-    initial: { y: up ? '45%' : '-45%', opacity: 0 },
+    initial: { y: up ? 13 : -13, opacity: 0 },
     animate: { y: 0, opacity: 1 },
-    exit: { y: up ? '-45%' : '45%', opacity: 0 },
-    transition: { type: 'tween', duration: 0.55, ease: [0.22, 1, 0.36, 1] }
+    exit: { y: up ? -13 : 13, opacity: 0 },
+    transition: { type: 'tween', duration: 0.72, ease: [0.22, 1, 0.36, 1] }
   }),
   scale: up => ({
     initial: { scale: up ? 0.35 : 1.7, opacity: 0 },
