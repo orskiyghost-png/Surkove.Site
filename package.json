@@ -11,7 +11,8 @@
   "dependencies": {
     "ogl": "1.0.11",
     "react": "19.3.1",
-    "react-dom": "19.3.1"
+    "react-dom": "19.3.1",
+    "three": "^0.187.0"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "6.2.1",

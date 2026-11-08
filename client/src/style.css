@@ -1,9 +1,11 @@
 :root {
-  color-scheme: light;
-  --page-bg: #f7f7f5;
-  --text: #171717;
-  --muted: #737373;
-  --accent: #2563eb;
+  color-scheme: dark;
+  --page-bg: #1b1c20;
+  --text: #f4f3f6;
+  --muted: #b3b0ba;
+  --accent: #c0afff;
+  --line: rgba(255, 255, 255, .15);
+  --surface: rgba(255, 255, 255, .065);
   font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   background: var(--page-bg);
   color: var(--text);
@@ -17,14 +19,47 @@ body {
   min-height: 100vh;
   min-height: 100svh;
   margin: 0;
-  display: grid;
-  place-items: center;
-  padding: clamp(28px, 7vw, 64px) 22px;
   background: var(--page-bg);
+  color: var(--text);
 }
 
 #root {
   width: 100%;
+  min-height: 100vh;
+  min-height: 100svh;
+}
+
+.site-shell {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  min-height: 100vh;
+  min-height: 100svh;
+  padding: clamp(28px, 7vw, 64px) 22px;
+  overflow: hidden;
+  background: var(--page-bg);
+  color: var(--text);
+}
+
+.color-bends-background {
+  position: fixed;
+  z-index: 0;
+  inset: 0;
+  overflow: hidden;
+  opacity: .82;
+  pointer-events: none;
+}
+
+.color-bends-background .color-bends-container {
+  width: 100%;
+  height: 100%;
+}
+
+.site-shell > main {
+  position: relative;
+  z-index: 1;
 }
 
 main {
@@ -47,12 +82,14 @@ main {
   align-items: center;
   gap: 9px;
   padding: 7px 12px;
-  border: 1px solid rgba(37, 99, 235, .18);
+  border: 1px solid rgba(192, 175, 255, .25);
   border-radius: 999px;
-  background: rgba(37, 99, 235, .055);
-  color: #1d4ed8;
+  background: var(--surface);
+  color: #d2c6ff;
   font-size: 13px;
   font-weight: 600;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
 }
 
 .dot {
@@ -66,6 +103,7 @@ main {
 .hero-heading {
   max-width: 850px;
   margin: 22px 0 0;
+  color: var(--text);
   font-size: clamp(43px, 9vw, 88px);
   line-height: .99;
   letter-spacing: -.065em;
@@ -100,7 +138,7 @@ main {
 .details {
   margin-top: 38px;
   padding-top: 19px;
-  border-top: 1px solid rgba(23, 23, 23, .12);
+  border-top: 1px solid var(--line);
   color: var(--muted);
   font-size: 14px;
   line-height: 1.6;
