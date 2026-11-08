@@ -1,25 +1,30 @@
 import { lazy, Suspense } from 'react';
 
-const SlicedWaves = lazy(() => import('./SlicedWaves.jsx'));
+const Threads = lazy(() => import('./Threads.jsx'));
 
 export default function App() {
   return (
     <div className="site-shell" aria-hidden="true">
       <Suspense fallback={null}>
-        <SlicedWaves
-          className="site-sliced-waves"
-          color1="#00b886"
-          color2="#0098e0"
-          color3="#3445ff"
-          ribbons={4}
-          spacing={28}
-          perspective={0.45}
-          blur={0.6}
-          glow={1}
-          position={0.78}
-          mouseInteraction={false}
-          spread={0.08}
-          lightMode
+        <Threads
+          className="site-threads"
+          color="#52525b"
+          lineCount={90}
+          thickness={0.6}
+          softness={1.3}
+          amplitude={1.7}
+          distance={0.4}
+          waves={1.05}
+          speed={0.6}
+          split={0.04}
+          fray={0.5}
+          angle={25}
+          taper={0.85}
+          brightness={1.4}
+          parting={0}
+          enableMouseInteraction={false}
+          fade={0}
+          opacity={1}
         />
       </Suspense>
     </div>

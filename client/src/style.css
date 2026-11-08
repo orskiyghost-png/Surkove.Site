@@ -40,7 +40,7 @@ body {
   background: var(--page-bg);
 }
 
-.site-shell .sliced-waves-container {
+.site-shell .threads-container {
   position: absolute;
   inset: 0;
   width: 100%;
@@ -48,7 +48,7 @@ body {
   overflow: hidden;
 }
 
-.site-shell .sliced-waves-canvas {
+.site-shell .threads-canvas {
   position: absolute;
   inset: 0;
   display: block;
